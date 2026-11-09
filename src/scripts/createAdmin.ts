@@ -27,7 +27,6 @@ async function main() {
     existing.role = "admin";
     existing.tokenVersion += 1;
     await existing.save();
-    console.log(`✅ ${email} is now an admin.`);
   } else {
     await User.create({
       fullName: process.env.ADMIN_NAME ?? "Administrateur Jury",
