@@ -11,6 +11,7 @@ export interface SubmissionDTO {
   fileName: string;
   status: "pending" | "evaluated" | "rejected";
   score: number | null;
+  storageStatus: "local" | "migrating" | "cloudinary";
 }
 
 export const toSubmissionDTO = (submission: SubmissionDocument): SubmissionDTO => ({
@@ -19,6 +20,7 @@ export const toSubmissionDTO = (submission: SubmissionDocument): SubmissionDTO =
   fileName: submission.fileName,
   status: submission.status as SubmissionDTO["status"],
   score: submission.score ?? null,
+  storageStatus: submission.storageStatus as SubmissionDTO["storageStatus"],
 });
 
 /* Version for the jury/admin: adds participant, duration and size. */

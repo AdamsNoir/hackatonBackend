@@ -3,7 +3,7 @@ import { Schema, model, type InferSchemaType, type HydratedDocument } from "mong
 /* =====================================================================
    SUBMISSION MODEL
    One document = one voice file sent by a participant.
-   Audio starts on disk and is archived to Cloudinary after evaluation.
+   Audio is staged on disk briefly, then uploaded to Cloudinary immediately.
    ===================================================================== */
 export const SUBMISSION_STATUSES = ["pending", "evaluated", "rejected"] as const;
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
@@ -17,7 +17,7 @@ const submissionSchema = new Schema(
     storedFileName: { type: String, required: true }, // real name on disk (unique)
     mimeType: { type: String, required: true },
     sizeBytes: { type: Number, required: true },
-    // Audio stays local until evaluation, then is migrated to Cloudinary.
+    // Local disk is temporary staging; new recordings are migrated immediately.
     storageStatus: {
       type: String,
       enum: ["local", "migrating", "cloudinary"],

@@ -26,15 +26,21 @@ export async function createSubmission({ userId, file, clientDuration }: CreateS
   const tolerance = AUDIO_RULES.durationToleranceSeconds;
 
   if (duration + tolerance < AUDIO_RULES.minDurationSeconds) {
-    throw ApiError.unprocessable(`Durée minimale : ${AUDIO_RULES.minDurationSeconds / 60} minutes.`);
+    throw ApiError.unprocessable("Recording must be at least 2 minutes long.");
   }
   if (duration - tolerance > AUDIO_RULES.maxDurationSeconds) {
-    throw ApiError.unprocessable(`Durée maximale : ${AUDIO_RULES.maxDurationSeconds / 60} minutes.`);
+    throw ApiError.unprocessable("Recording must not exceed 5 minutes.");
   }
 
-  // 2. Save in MongoDB (status "pending" until the jury evaluates it)
+  // Cloudinary is required for new submissions: never report success while
+  // silently leaving a new recording only on Render's temporary disk.
+  if (!cloudinaryConfigured) {
+    throw new ApiError(503, "Audio storage is unavailable. Please try again later.");
+  }
+
+  // 2. Create the pending submission, then upload the audio immediately.
   const extension = path.extname(file.filename).toLowerCase();
-  return Submission.create({
+  const submission = await Submission.create({
     user: userId,
     fileName: sanitizeFileName(file.originalname),
     storedFileName: file.filename,
@@ -42,6 +48,22 @@ export async function createSubmission({ userId, file, clientDuration }: CreateS
     sizeBytes: file.size,
     durationSeconds: Math.round(duration),
   });
+
+  // The participant receives success only after Cloudinary confirms the file.
+  let uploaded: Awaited<ReturnType<typeof migrateSubmissionAudio>>;
+  try {
+    uploaded = await migrateSubmissionAudio(submission.id);
+  } catch (error) {
+    await Submission.deleteOne({ _id: submission.id });
+    throw error;
+  }
+
+  if (!uploaded || uploaded.storageStatus !== "cloudinary") {
+    await Submission.deleteOne({ _id: submission.id });
+    throw new ApiError(502, "Your recording could not be uploaded to secure storage. Please try again.");
+  }
+
+  return uploaded;
 }
 
 /* Submissions of one user, newest first ("Mes soumissions" table). */
@@ -79,15 +101,11 @@ export async function evaluateSubmission({ submissionId, evaluatorId, status, sc
   submission.evaluatedAt = new Date();
   submission.evaluatedBy = evaluatorId as never; // string id is cast to ObjectId by mongoose
   await submission.save();
-
-  // Evaluation/rejection completes the recording's local processing stage.
-  // Migration failures are recorded but do not undo the jury's evaluation.
-  await migrateSubmissionAudio(submission.id);
-  return (await Submission.findById(submission.id)) ?? submission;
+  return submission;
 }
 
 /**
- * Move one completed recording from local disk to Cloudinary.
+ * Move one recording from local disk to Cloudinary immediately after submission.
  * Safe to retry: a MongoDB lock prevents two requests uploading the same file.
  * The local file is removed only after Cloudinary and MongoDB both succeed.
  */
@@ -102,7 +120,6 @@ export async function migrateSubmissionAudio(submissionId: string) {
   const submission = await Submission.findOneAndUpdate(
     {
       _id: submissionId,
-      status: { $in: ["evaluated", "rejected"] },
       $or: [
         { storageStatus: "local" },
         { storageStatus: { $exists: false } }, // submissions created before this feature
@@ -113,7 +130,7 @@ export async function migrateSubmissionAudio(submissionId: string) {
     { new: true },
   );
 
-  // Already migrated, not yet evaluated, or another request is migrating it.
+  // Already migrated or another request is migrating it.
   if (!submission) return Submission.findById(submissionId);
 
   const localPath = path.join(AUDIO_UPLOAD_DIR, path.basename(submission.storedFileName));

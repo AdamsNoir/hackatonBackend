@@ -4,13 +4,13 @@ import { env } from "./env";
 
 /* =====================================================================
    AUDIO RULES
-   Keep these numbers identical to the frontend (src/config/audioRules.ts)
+   Keep these numbers identical to the frontend recording rules.
    ===================================================================== */
 export const AUDIO_RULES = {
   maxFileSizeMb: 15,
-  minDurationSeconds: 3 * 60, // 3 minutes
+  minDurationSeconds: 2 * 60, // 2 minutes
   maxDurationSeconds: 5 * 60, // 5 minutes
-  durationToleranceSeconds: 2, // small margin for rounding
+  durationToleranceSeconds: 0, // enforce the exact 2–5 minute limits
 } as const;
 
 /* Allowed extensions and the content type we trust for each.
