@@ -7,15 +7,17 @@ import { toLeaderboardEntryDTO, type LeaderboardRow } from "../mappers/leaderboa
    Builds the ranking in ONE MongoDB aggregation:
      1. group the submissions by participant
      2. keep each participant's BEST evaluated score
-     3. sort: highest score first (ties: who submitted first wins)
-     4. attach name / avatar / language from the users collection
+     3. attach name / avatar / language from the users collection
+     4. sort: highest score first (ties: who submitted first wins)
+   One prize per language: ask ?language=Ewondo to get the ranking (and
+   the winner = first row) of a single language.
 
    Want another rule? Change the "score" line in the $group stage:
      best score  -> $max (current)
      total score -> $sum
      average     -> $avg
    ===================================================================== */
-export async function getLeaderboard(limit = 100) {
+export async function getLeaderboard(limit = 100, language?: string) {
   const rows = await Submission.aggregate<LeaderboardRow>([
     {
       $group: {
@@ -27,10 +29,12 @@ export async function getLeaderboard(limit = 100) {
       },
     },
     { $match: { score: { $ne: null } } }, // hide people with no evaluated score yet
-    { $sort: { score: -1, firstSubmissionAt: 1 } },
-    { $limit: limit },
     { $lookup: { from: User.collection.name, localField: "_id", foreignField: "_id", as: "user" } },
     { $unwind: "$user" },
+    // Optional filter: only one language (the ranking is then "inside" that language)
+    ...(language ? [{ $match: { "user.language": language } }] : []),
+    { $sort: { score: -1, firstSubmissionAt: 1 } },
+    { $limit: limit },
     {
       $project: {
         _id: 0,

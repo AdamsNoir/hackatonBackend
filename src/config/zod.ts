@@ -8,6 +8,7 @@ z.setErrorMap((issue, context) => {
   if (issue.code === "invalid_type") {
     return { message: issue.received === "undefined" ? "Champ requis." : "Format de données invalide." };
   }
+  if (issue.code === "invalid_enum_value") return { message: "Valeur non autorisée." };
   if (issue.code === "unrecognized_keys") return { message: "Champs non autorisés." };
   return { message: context.defaultError };
 });

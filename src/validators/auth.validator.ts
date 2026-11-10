@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CONTEST_LANGUAGES } from "../config/languages";
 import { isCameroonPhone } from "../utils/phone";
 
 /* =====================================================================
@@ -27,14 +28,17 @@ export const phoneSchema = z
   .string({ required_error: "Le téléphone est requis." })
   .refine(isCameroonPhone, "Numéro invalide. Exemple : 6 77 12 34 56");
 
-export const languageSchema = z.string().trim().min(2).max(60);
+/* Must be one of the contest languages (config/languages.ts). */
+export const languageSchema = z.enum(CONTEST_LANGUAGES, {
+  errorMap: () => ({ message: "Choisissez l'une des langues du concours." }),
+});
 
 export const registerSchema = z.object({
   fullName: fullNameSchema,
   phone: phoneSchema,
   email: z.string({ required_error: "L'email est requis." }).trim().toLowerCase().email("Adresse email invalide.").max(254),
   password: passwordSchema,
-  language: languageSchema.optional(), // mother tongue (optional at registration)
+  language: languageSchema, // mother tongue represented (one prize per language)
 });
 
 export const loginSchema = z.object({
