@@ -21,49 +21,32 @@ interface CreateSubmissionInput {
 
 /* Checks the saved audio, then stores its details in MongoDB. */
 export async function createSubmission({ userId, file, clientDuration }: CreateSubmissionInput) {
-  // 1. Check it is a real audio file and read its REAL duration
-  const duration = await inspectAudioFile(file.path, clientDuration);
-  const tolerance = AUDIO_RULES.durationToleranceSeconds;
-
-  if (duration + tolerance < AUDIO_RULES.minDurationSeconds) {
-    throw ApiError.unprocessable("Recording must be at least 2 minutes long.");
-  }
-  if (duration - tolerance > AUDIO_RULES.maxDurationSeconds) {
-    throw ApiError.unprocessable("Recording must not exceed 5 minutes.");
-  }
-
-  // Cloudinary is required for new submissions: never report success while
-  // silently leaving a new recording only on Render's temporary disk.
-  if (!cloudinaryConfigured) {
-    throw new ApiError(503, "Audio storage is unavailable. Please try again later.");
+  let duration: number;
+  try {
+    duration = await inspectAudioFile(file.path, clientDuration);
+    const tolerance = AUDIO_RULES.durationToleranceSeconds;
+    if (duration + tolerance < AUDIO_RULES.minDurationSeconds)
+      throw ApiError.unprocessable("Recording must be at least 2 minutes long.");
+    if (duration - tolerance > AUDIO_RULES.maxDurationSeconds)
+      throw ApiError.unprocessable("Recording must not exceed 5 minutes.");
+  } catch (error) {
+    await removeFile(file.path); // invalid file: delete it
+    throw error;
   }
 
-  // 2. Create the pending submission, then upload the audio immediately.
   const extension = path.extname(file.filename).toLowerCase();
   const submission = await Submission.create({
     user: userId,
     fileName: sanitizeFileName(file.originalname),
     storedFileName: file.filename,
-    mimeType: MIME_BY_EXTENSION[extension] ?? "application/octet-stream", // trusted type, not the browser's
+    mimeType: MIME_BY_EXTENSION[extension] ?? "application/octet-stream",
     sizeBytes: file.size,
     durationSeconds: Math.round(duration),
   });
 
-  // The participant receives success only after Cloudinary confirms the file.
-  let uploaded: Awaited<ReturnType<typeof migrateSubmissionAudio>>;
-  try {
-    uploaded = await migrateSubmissionAudio(submission.id);
-  } catch (error) {
-    await Submission.deleteOne({ _id: submission.id });
-    throw error;
-  }
-
-  if (!uploaded || uploaded.storageStatus !== "cloudinary") {
-    await Submission.deleteOne({ _id: submission.id });
-    throw new ApiError(502, "Your recording could not be uploaded to secure storage. Please try again.");
-  }
-
-  return uploaded;
+  // Try to migrate now. On failure the record stays as "local" so it can be retried.
+  // Do NOT delete the record or the file here.
+  return (await migrateSubmissionAudio(submission.id)) ?? submission;
 }
 
 /* Submissions of one user, newest first ("Mes soumissions" table). */
