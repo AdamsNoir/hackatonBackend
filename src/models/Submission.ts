@@ -3,7 +3,7 @@ import { Schema, model, type InferSchemaType, type HydratedDocument } from "mong
 /* =====================================================================
    SUBMISSION MODEL
    One document = one voice file sent by a participant.
-   The audio itself stays on disk; MongoDB keeps its details.
+   Audio starts on disk and is archived to Cloudinary after evaluation.
    ===================================================================== */
 export const SUBMISSION_STATUSES = ["pending", "evaluated", "rejected"] as const;
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
@@ -17,6 +17,18 @@ const submissionSchema = new Schema(
     storedFileName: { type: String, required: true }, // real name on disk (unique)
     mimeType: { type: String, required: true },
     sizeBytes: { type: Number, required: true },
+    // Audio stays local until evaluation, then is migrated to Cloudinary.
+    storageStatus: {
+      type: String,
+      enum: ["local", "migrating", "cloudinary"],
+      default: "local",
+      index: true,
+    },
+    cloudinaryPublicId: { type: String, default: null },
+    cloudinaryFormat: { type: String, default: null },
+    storageError: { type: String, default: null },
+    migrationStartedAt: { type: Date, default: null },
+    migratedAt: { type: Date, default: null },
     durationSeconds: { type: Number, required: true },
 
     // ----- Evaluation (filled by the jury) -----

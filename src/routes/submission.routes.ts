@@ -20,6 +20,13 @@ router.get("/mine", requireAuth, submissionController.getMySubmissions);
 // Admin (jury)
 router.get("/stats", requireAuth, requireRole("admin"), submissionController.getStats);
 router.get("/", requireAuth, requireRole("admin"), validateQuery(listSubmissionsQuerySchema), submissionController.listSubmissions);
+router.post(
+  "/:id/migrate",
+  requireAuth,
+  requireRole("admin"),
+  validateParams(idParamsSchema),
+  submissionController.retryAudioMigration,
+);
 router.patch(
   "/:id/evaluate",
   requireAuth,

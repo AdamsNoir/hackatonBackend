@@ -84,3 +84,10 @@ Browser note: an `<audio src>` tag cannot send the Authorization header. To play
 3. Set `CLIENT_ORIGIN` to your real frontend address.
 4. Back up the `uploads/` folder, or move files to S3-style storage when you scale.
 5. Not included (next steps): password reset by email/SMS, email/phone verification, refresh tokens.
+
+
+## Cloudinary audio archiving
+
+Audio remains in `uploads/audio` while a submission is `pending`. When an admin evaluates or rejects it, the backend automatically uploads it to Cloudinary as a private video-resource audio asset, stores the Cloudinary public ID in MongoDB, then deletes the local file. If the upload fails, the local file is retained and the jury evaluation is not rolled back. An admin can retry with `POST /api/submissions/:id/migrate`.
+
+Configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the backend environment. Copy `.env.example` to `.env` and fill in the values. Install dependencies with `npm install` (this updates the lockfile) or `npm install cloudinary`. Never commit `.env`.

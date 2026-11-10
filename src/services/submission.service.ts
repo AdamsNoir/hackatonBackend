@@ -1,8 +1,10 @@
 import path from "path";
+import fs from "fs/promises";
+import cloudinary, { cloudinaryConfigured } from "../config/cloudinary";
 import { AUDIO_RULES, AUDIO_UPLOAD_DIR, MIME_BY_EXTENSION } from "../config/audioRules";
 import { Submission, type SubmissionStatus } from "../models/Submission";
 import { ApiError } from "../utils/ApiError";
-import { inspectAudioFile, sanitizeFileName } from "../utils/audio";
+import { inspectAudioFile, removeFile, sanitizeFileName } from "../utils/audio";
 import type { ListSubmissionsQuery } from "../validators/submission.validator";
 
 /* =====================================================================
@@ -77,7 +79,87 @@ export async function evaluateSubmission({ submissionId, evaluatorId, status, sc
   submission.evaluatedAt = new Date();
   submission.evaluatedBy = evaluatorId as never; // string id is cast to ObjectId by mongoose
   await submission.save();
-  return submission;
+
+  // Evaluation/rejection completes the recording's local processing stage.
+  // Migration failures are recorded but do not undo the jury's evaluation.
+  await migrateSubmissionAudio(submission.id);
+  return (await Submission.findById(submission.id)) ?? submission;
+}
+
+/**
+ * Move one completed recording from local disk to Cloudinary.
+ * Safe to retry: a MongoDB lock prevents two requests uploading the same file.
+ * The local file is removed only after Cloudinary and MongoDB both succeed.
+ */
+export async function migrateSubmissionAudio(submissionId: string) {
+  if (!cloudinaryConfigured) {
+    console.warn("Cloudinary is not configured; audio migration was skipped.");
+    return Submission.findById(submissionId);
+  }
+
+  // Recover a migration lock left behind if the server crashed mid-transfer.
+  const staleLockBefore = new Date(Date.now() - 15 * 60 * 1000);
+  const submission = await Submission.findOneAndUpdate(
+    {
+      _id: submissionId,
+      status: { $in: ["evaluated", "rejected"] },
+      $or: [
+        { storageStatus: "local" },
+        { storageStatus: { $exists: false } }, // submissions created before this feature
+        { storageStatus: "migrating", migrationStartedAt: { $lt: staleLockBefore } },
+      ],
+    },
+    { $set: { storageStatus: "migrating", storageError: null, migrationStartedAt: new Date() } },
+    { new: true },
+  );
+
+  // Already migrated, not yet evaluated, or another request is migrating it.
+  if (!submission) return Submission.findById(submissionId);
+
+  const localPath = path.join(AUDIO_UPLOAD_DIR, path.basename(submission.storedFileName));
+  let uploadedPublicId: string | undefined;
+
+  try {
+    await fs.access(localPath);
+
+    const uploadResult = await cloudinary.uploader.upload(localPath, {
+      resource_type: "video", // Cloudinary uses video resource_type for audio files.
+      type: "private",
+      folder: "mother-tongue-contest/submissions",
+      public_id: submission.id,
+      overwrite: true,
+    });
+    uploadedPublicId = uploadResult.public_id;
+
+    // Register the cloud copy before deleting the only local copy.
+    submission.cloudinaryPublicId = uploadResult.public_id;
+    submission.cloudinaryFormat = uploadResult.format || path.extname(submission.storedFileName).slice(1);
+    submission.storageStatus = "cloudinary";
+    submission.storageError = null;
+    submission.migrationStartedAt = null;
+    submission.migratedAt = new Date();
+    await submission.save();
+
+    await removeFile(localPath);
+    return submission;
+  } catch (error) {
+    // If the cloud upload succeeded but MongoDB could not be updated, remove
+    // the unreferenced cloud copy and retain the original local file.
+    if (uploadedPublicId) {
+      await cloudinary.uploader.destroy(uploadedPublicId, {
+        resource_type: "video",
+        type: "private",
+      }).catch((cleanupError: unknown) => console.error("Cloudinary rollback failed:", cleanupError));
+    }
+
+    const message = error instanceof Error ? error.message : "Unknown migration error";
+    await Submission.updateOne(
+      { _id: submissionId, storageStatus: "migrating" },
+      { $set: { storageStatus: "local", storageError: message.slice(0, 500), migrationStartedAt: null } },
+    );
+    console.error(`Audio migration failed for submission ${submissionId}:`, error);
+    return Submission.findById(submissionId);
+  }
 }
 
 /* Finds the audio file of a submission.
@@ -88,8 +170,21 @@ export async function getAudioForUser(submissionId: string, requester: { id: str
   const allowed = submission && (requester.role === "admin" || String(submission.user) === requester.id);
   if (!submission || !allowed) throw ApiError.notFound("Soumission introuvable.");
 
+  if (submission.storageStatus === "cloudinary" && submission.cloudinaryPublicId && submission.cloudinaryFormat) {
+    const audioUrl = cloudinary.utils.private_download_url(
+      submission.cloudinaryPublicId,
+      submission.cloudinaryFormat,
+      {
+        resource_type: "video",
+        type: "private",
+        expires_at: Math.floor(Date.now() / 1000) + 600,
+      },
+    );
+    return { audioUrl, mimeType: submission.mimeType };
+  }
+
+  // Local file remains the playback source until migration succeeds.
   return {
-    // path.basename = protection against path traversal ("../../etc/passwd")
     filePath: path.join(AUDIO_UPLOAD_DIR, path.basename(submission.storedFileName)),
     mimeType: submission.mimeType,
   };

@@ -1,3 +1,4 @@
+import { Readable } from "stream";
 import { getRequestUser } from "../middlewares/auth.middleware";
 import { toAdminSubmissionDTO, toSubmissionDTO } from "../mappers/submission.mapper";
 import * as submissionService from "../services/submission.service";
@@ -54,14 +55,52 @@ export const evaluateSubmission = asyncHandler(async (req, res) => {
 
 // GET /submissions/:id/audio   (owner or admin) - streams the audio file
 export const streamAudio = asyncHandler(async (req, res) => {
-  const { filePath, mimeType } = await submissionService.getAudioForUser(
+  const audio = await submissionService.getAudioForUser(
     String(req.params.id),
     getRequestUser(req),
   );
 
-  res.setHeader("Content-Type", mimeType);
-  res.setHeader("Cache-Control", "private, no-store"); // never cached by shared proxies
-  res.sendFile(filePath, { headers: { "Content-Disposition": "inline" } }); // supports seeking (Range)
+  res.setHeader("Cache-Control", "private, no-store");
+  if ("audioUrl" in audio) {
+    // Proxy the private Cloudinary file through this API. This preserves the
+    // existing same-origin audio endpoint and supports HTTP Range requests.
+    const upstream = await fetch(audio.audioUrl, {
+      headers: req.headers.range ? { Range: req.headers.range } : undefined,
+    });
+
+    if (!upstream.ok || !upstream.body) {
+      throw new ApiError(502, "Impossible de récupérer l'audio depuis le stockage cloud.");
+    }
+
+    res.status(upstream.status === 206 ? 206 : 200);
+    res.setHeader("Content-Type", audio.mimeType);
+    for (const header of ["content-length", "content-range", "accept-ranges"]) {
+      const value = upstream.headers.get(header);
+      if (value) res.setHeader(header, value);
+    }
+    return Readable.fromWeb(upstream.body as import("stream/web").ReadableStream).pipe(res);
+  }
+
+  res.setHeader("Content-Type", audio.mimeType);
+  res.sendFile(audio.filePath, { headers: { "Content-Disposition": "inline" } });
+});
+
+
+// POST /submissions/:id/migrate (admin: retry a failed local-to-cloud migration)
+export const retryAudioMigration = asyncHandler(async (req, res) => {
+  const submission = await submissionService.migrateSubmissionAudio(String(req.params.id));
+  if (!submission) throw ApiError.notFound("Soumission introuvable.");
+  res.json({
+    id: submission.id,
+    status: submission.status,
+    storageStatus: submission.storageStatus,
+    migratedAt: submission.migratedAt ?? null,
+    message: submission.storageStatus === "cloudinary"
+      ? "Enregistrement transféré vers Cloudinary."
+      : submission.storageStatus === "migrating"
+        ? "Transfert déjà en cours."
+        : "Transfert non effectué. Vérifiez la configuration et réessayez.",
+  });
 });
 
 // GET /submissions/stats   (admin)
