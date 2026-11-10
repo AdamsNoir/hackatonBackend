@@ -64,6 +64,9 @@ export const streamAudio = asyncHandler(async (req, res) => {
   if ("audioUrl" in audio) {
     // Proxy the private Cloudinary file through this API. This preserves the
     // existing same-origin audio endpoint and supports HTTP Range requests.
+    if (!audio.audioUrl) {
+      throw new ApiError(502, "Impossible de générer l'URL de l'audio cloud.");
+    }
     const upstream = await fetch(audio.audioUrl, {
       headers: req.headers.range ? { Range: req.headers.range } : undefined,
     });
