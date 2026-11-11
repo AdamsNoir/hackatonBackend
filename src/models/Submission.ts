@@ -1,46 +1,31 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from "mongoose";
 
-/* =====================================================================
-   SUBMISSION MODEL
-   One document = one voice file sent by a participant.
-   Audio is staged on disk briefly, then uploaded to Cloudinary immediately.
-   ===================================================================== */
 export const SUBMISSION_STATUSES = ["pending", "evaluated", "rejected"] as const;
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
 
 const submissionSchema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-
-    // ----- File details -----
-    fileName: { type: String, required: true }, // cleaned name shown in the table
-    storedFileName: { type: String, required: true }, // real name on disk (unique)
+    fileName: { type: String, required: true },
+    // Optional only to remain compatible with submissions created by the old disk-upload flow.
+    storedFileName: { type: String },
     mimeType: { type: String, required: true },
     sizeBytes: { type: Number, required: true },
-    // Local disk is temporary staging; new recordings are migrated immediately.
-    storageStatus: {
-      type: String,
-      enum: ["local", "migrating", "cloudinary"],
-      default: "local",
-      index: true,
-    },
+    storageStatus: { type: String, enum: ["local", "migrating", "cloudinary"], default: "cloudinary", index: true },
     cloudinaryPublicId: { type: String, default: null },
     cloudinaryFormat: { type: String, default: null },
     storageError: { type: String, default: null },
     migrationStartedAt: { type: Date, default: null },
     migratedAt: { type: Date, default: null },
     durationSeconds: { type: Number, required: true },
-
-    // ----- Evaluation (filled by the jury) -----
     status: { type: String, enum: SUBMISSION_STATUSES, default: "pending" },
-    score: { type: Number, min: 0, max: 100, default: null }, // null until evaluated
+    score: { type: Number, min: 0, max: 100, default: null },
     evaluatedAt: { type: Date },
     evaluatedBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
-  { timestamps: true }, // adds createdAt and updatedAt
+  { timestamps: true },
 );
 
-// Speeds up "my submissions", the admin list and the leaderboard
 submissionSchema.index({ user: 1, createdAt: -1 });
 submissionSchema.index({ status: 1, createdAt: -1 });
 submissionSchema.index({ status: 1, score: -1 });
