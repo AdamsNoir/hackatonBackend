@@ -17,18 +17,22 @@ export const createSubmission = asyncHandler(async (req, res) => {
   const user = getRequestUser(req);
   if (!req.file) throw ApiError.badRequest("Aucun fichier audio reçu (champ « audio »).");
 
+  let durationSeconds: number | undefined;
   try {
-    const { durationSeconds } = createSubmissionSchema.parse(req.body);
-    const submission = await submissionService.createSubmission({
-      userId: user.id,
-      file: req.file,
-      clientDuration: durationSeconds,
-    });
-    res.status(201).json(toSubmissionDTO(submission));
+    ({ durationSeconds } = createSubmissionSchema.parse(req.body));
   } catch (error) {
-    await removeFile(req.file.path); // do not keep rejected files on disk
+    await removeFile(req.file.path); // bad form data: nothing saved yet
     throw error;
   }
+
+  // The service removes the file itself if the audio is invalid.
+  // Once the record exists, the file is kept so the migration can be retried.
+  const submission = await submissionService.createSubmission({
+    userId: user.id,
+    file: req.file,
+    clientDuration: durationSeconds,
+  });
+  res.status(201).json(toSubmissionDTO(submission));
 });
 
 // GET /submissions/mine

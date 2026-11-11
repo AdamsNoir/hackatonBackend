@@ -43,6 +43,9 @@ src/
 | POST   | /api/submissions                  | logged in     | upload voice (multipart: `audio`, `durationSeconds`) |
 | GET    | /api/submissions/mine             | logged in     | "Mes soumissions" table |
 | GET    | /api/submissions/:id/audio        | owner / admin | stream the audio (supports seeking) |
+| GET    | /api/phrases?page=1               | logged in     | page 1 = the 5 graded phrases (same for everyone); pages 2+ = 5 practice phrases each (max 35, different start per user). The size of the 200-phrase pool is never exposed |
+| POST   | /api/phrases                      | admin         | `{phrases:[{text, category?}]}` append French phrases (duplicates skipped) |
+| POST   | /api/submissions/:id/migrate      | admin         | retry the Cloudinary upload of one recording |
 | GET    | /api/leaderboard?limit=100        | logged in     | ranking table |
 | GET    | /api/submissions?status=&page=&limit= | admin     | all submissions + participant, paginated |
 | PATCH  | /api/submissions/:id/evaluate     | admin         | `{status:"evaluated", score:0-100}` or `{status:"rejected"}` |
@@ -88,6 +91,6 @@ Browser note: an `<audio src>` tag cannot send the Authorization header. To play
 
 ## Cloudinary audio archiving
 
-Audio remains in `uploads/audio` while a submission is `pending`. When an admin evaluates or rejects it, the backend automatically uploads it to Cloudinary as a private video-resource audio asset, stores the Cloudinary public ID in MongoDB, then deletes the local file. If the upload fails, the local file is retained and the jury evaluation is not rolled back. An admin can retry with `POST /api/submissions/:id/migrate`.
+When a recording is submitted it is saved in `uploads/audio` and uploaded to Cloudinary immediately (private video-resource asset). The Cloudinary ID is stored in MongoDB and the local file is deleted only after both succeed. If the upload fails, the submission and the local file are **kept** (`storageStatus: "local"`) and the participant still gets a success response. The upload is retried automatically at startup and every 10 minutes, or manually with `POST /api/submissions/:id/migrate`. On Render, use a persistent disk for `UPLOAD_DIR` so pending files survive restarts.
 
 Configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the backend environment. Copy `.env.example` to `.env` and fill in the values. Install dependencies with `npm install` (this updates the lockfile) or `npm install cloudinary`. Never commit `.env`.

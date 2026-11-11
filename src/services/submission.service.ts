@@ -21,31 +21,36 @@ interface CreateSubmissionInput {
 
 /* Checks the saved audio, then stores its details in MongoDB. */
 export async function createSubmission({ userId, file, clientDuration }: CreateSubmissionInput) {
+  // 1. Check it is a real audio file and read its REAL duration.
+  //    Invalid file: delete it from disk and stop here.
   let duration: number;
   try {
     duration = await inspectAudioFile(file.path, clientDuration);
     const tolerance = AUDIO_RULES.durationToleranceSeconds;
-    if (duration + tolerance < AUDIO_RULES.minDurationSeconds)
+    if (duration + tolerance < AUDIO_RULES.minDurationSeconds) {
       throw ApiError.unprocessable("Recording must be at least 2 minutes long.");
-    if (duration - tolerance > AUDIO_RULES.maxDurationSeconds)
+    }
+    if (duration - tolerance > AUDIO_RULES.maxDurationSeconds) {
       throw ApiError.unprocessable("Recording must not exceed 5 minutes.");
+    }
   } catch (error) {
-    await removeFile(file.path); // invalid file: delete it
+    await removeFile(file.path);
     throw error;
   }
 
+  // 2. Save the submission, then try to move the audio to Cloudinary right away.
   const extension = path.extname(file.filename).toLowerCase();
   const submission = await Submission.create({
     user: userId,
     fileName: sanitizeFileName(file.originalname),
     storedFileName: file.filename,
-    mimeType: MIME_BY_EXTENSION[extension] ?? "application/octet-stream",
+    mimeType: MIME_BY_EXTENSION[extension] ?? "application/octet-stream", // trusted type, not the browser's
     sizeBytes: file.size,
     durationSeconds: Math.round(duration),
   });
 
-  // Try to migrate now. On failure the record stays as "local" so it can be retried.
-  // Do NOT delete the record or the file here.
+  // If the upload fails, the record stays with storageStatus "local" and the
+  // file stays on disk, so an admin can retry with POST /submissions/:id/migrate.
   return (await migrateSubmissionAudio(submission.id)) ?? submission;
 }
 
@@ -160,6 +165,31 @@ export async function migrateSubmissionAudio(submissionId: string) {
     console.error(`Audio migration failed for submission ${submissionId}:`, error);
     return Submission.findById(submissionId);
   }
+}
+
+/* Retries every recording still on local disk (failed uploads, older submissions).
+   Run at startup and on a timer; safe to repeat thanks to the migration lock. */
+export async function retryPendingMigrations(limit = 20) {
+  if (!cloudinaryConfigured) return 0;
+  const staleLockBefore = new Date(Date.now() - 15 * 60 * 1000);
+  const waiting = await Submission.find({
+    $or: [
+      { storageStatus: "local" },
+      { storageStatus: { $exists: false } },
+      { storageStatus: "migrating", migrationStartedAt: { $lt: staleLockBefore } },
+    ],
+  })
+    .sort({ createdAt: 1 })
+    .limit(limit)
+    .select("_id");
+
+  let migrated = 0;
+  for (const item of waiting) {
+    const result = await migrateSubmissionAudio(item.id); // one at a time: gentle on Cloudinary
+    if (result?.storageStatus === "cloudinary") migrated += 1;
+  }
+  if (waiting.length) console.log(`Audio migration sweep: ${migrated}/${waiting.length} moved to Cloudinary.`);
+  return migrated;
 }
 
 /* Finds the audio file of a submission.
