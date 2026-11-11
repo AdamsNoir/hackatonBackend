@@ -41,7 +41,18 @@ export const streamAudio = asyncHandler(async (req, res) => {
   const audio = await submissionService.getAudioForUser(String(req.params.id), getRequestUser(req));
   res.setHeader("Cache-Control", "private, no-store");
   if ("audioUrl" in audio) {
-    const upstream = await fetch(audio.audioUrl, { headers: req.headers.range ? { Range: req.headers.range } : undefined });
+    if (!audio.audioUrl) {
+      throw new ApiError(
+        502,
+        "Unable to generate the Cloudinary audio URL."
+      );
+    }
+
+    const upstream = await fetch(audio.audioUrl, {
+      headers: req.headers.range
+        ? { Range: req.headers.range }
+        : undefined,
+    });
     if (!upstream.ok || !upstream.body) throw new ApiError(502, "Impossible de récupérer l'audio depuis le stockage cloud.");
     res.status(upstream.status === 206 ? 206 : 200);
     res.setHeader("Content-Type", audio.mimeType);
