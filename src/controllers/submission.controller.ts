@@ -53,7 +53,12 @@ export const streamAudio = asyncHandler(async (req, res) => {
         ? { Range: req.headers.range }
         : undefined,
     });
-    if (!upstream.ok || !upstream.body) throw new ApiError(502, "Impossible de récupérer l'audio depuis le stockage cloud.");
+    if (!upstream.ok || !upstream.body) {
+      // Log the real Cloudinary answer so the cause is visible in the server logs
+      const detail = await upstream.text().catch(() => "");
+      console.error(`Cloudinary audio fetch failed (${upstream.status}) for submission ${String(req.params.id)}:`, detail.slice(0, 300));
+      throw new ApiError(502, `Impossible de récupérer l'audio depuis le stockage cloud (Cloudinary ${upstream.status}).`);
+    }
     res.status(upstream.status === 206 ? 206 : 200);
     res.setHeader("Content-Type", audio.mimeType);
     for (const header of ["content-length", "content-range", "accept-ranges"]) {
