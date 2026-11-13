@@ -5,6 +5,7 @@ import { AUDIO_RULES, MIME_BY_EXTENSION } from "../config/audioRules";
 import { Submission, type SubmissionStatus } from "../models/Submission";
 import { ApiError } from "../utils/ApiError";
 import { sanitizeFileName } from "../utils/audio";
+import { getRequiredPhrases } from "./phrase.service";
 import type { ListSubmissionsQuery } from "../validators/submission.validator";
 
 interface CreateSubmissionInput {
@@ -60,6 +61,9 @@ export async function createSubmission({ userId, file, clientDuration }: CreateS
     throw ApiError.unprocessable("Recording must not exceed 5 minutes.");
   }
 
+  // The 5 graded phrases this participant was shown: they all map to this ONE voice.
+  const phrases = await getRequiredPhrases(userId);
+
   // Upload first. A failed Cloudinary upload creates no dangling MongoDB record.
   const temporaryId = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   let cloud: { publicId: string; format: string };
@@ -77,6 +81,7 @@ export async function createSubmission({ userId, file, clientDuration }: CreateS
       mimeType: trustedMime,
       sizeBytes: file.size,
       durationSeconds: Math.round(duration),
+      phrases,
       storageStatus: "cloudinary",
       cloudinaryPublicId: cloud.publicId,
       cloudinaryFormat: cloud.format,

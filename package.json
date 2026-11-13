@@ -10,9 +10,12 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "create-admin": "tsx src/scripts/createAdmin.ts",
-    "create-admin:prod": "node dist/scripts/createAdmin.js"
+    "create-admin:prod": "node dist/scripts/createAdmin.js",
+    "export-data": "tsx src/scripts/exportData.ts",
+    "export-data:prod": "node dist/scripts/exportData.js"
   },
   "dependencies": {
+    "@types/archiver": "^6.0.4",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -20,10 +23,12 @@
     "@types/morgan": "^1.9.10",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.0",
+    "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
     "cloudinary": "^2.7.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.7.3",
     "helmet": "^8.0.0",

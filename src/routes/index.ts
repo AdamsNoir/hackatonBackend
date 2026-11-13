@@ -1,5 +1,6 @@
 import { Router } from "express";
 import authRoutes from "./auth.routes";
+import exportRoutes from "./export.routes";
 import freestyleRoutes from "./freestyle.routes";
 import leaderboardRoutes from "./leaderboard.routes";
 import phraseRoutes from "./phrase.routes";
@@ -21,5 +22,6 @@ router.use("/submissions", submissionRoutes);
 router.use("/leaderboard", leaderboardRoutes);
 router.use("/phrases", phraseRoutes);
 router.use("/freestyle", freestyleRoutes);
+router.use("/admin/export", exportRoutes);
 
 export default router;

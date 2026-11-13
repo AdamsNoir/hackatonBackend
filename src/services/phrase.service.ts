@@ -13,15 +13,31 @@ function userPhraseOrder(userId: string, phraseId: string): string {
   return crypto.createHash("sha256").update(`${userId}:${phraseId}`).digest("hex");
 }
 
+/** The pool sorted in this participant's own stable order. */
+function sortForUser<T extends { _id: unknown }>(all: T[], userId: string): T[] {
+  return [...all].sort((a, b) =>
+    userPhraseOrder(userId, String(a._id)).localeCompare(userPhraseOrder(userId, String(b._id))),
+  );
+}
+
+/** The participant's graded phrases, picked from an already-loaded pool (no database call). */
+export function pickRequiredPhrases<T extends { _id: unknown }>(all: T[], userId: string): T[] {
+  return sortForUser(all, userId).slice(0, REQUIRED_PHRASES_COUNT);
+}
+
+/** The graded phrases in the shape saved on a submission (phrase id + text + category). */
+export async function getRequiredPhrases(userId: string) {
+  const all = await Phrase.find({ isActive: true }).select("text category").lean();
+  return pickRequiredPhrases(all, userId).map((p) => ({ phrase: p._id, text: p.text, category: p.category ?? "general" }));
+}
+
 export async function listPhrases(userId: string, { page }: ListPhrasesQuery) {
   const [all, user] = await Promise.all([
     Phrase.find({ isActive: true }).select("text order").lean(),
     User.findById(userId).select("language").lean(),
   ]);
 
-  const ordered = [...all].sort((a, b) =>
-    userPhraseOrder(userId, String(a._id)).localeCompare(userPhraseOrder(userId, String(b._id))),
-  );
+  const ordered = sortForUser(all, userId);
   const assigned = ordered.slice(0, REQUIRED_PHRASES_COUNT + MAX_EXTRA_PHRASES);
   const required = assigned.slice(0, REQUIRED_PHRASES_COUNT);
   const practice = assigned.slice(REQUIRED_PHRASES_COUNT);
